@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">EyeLevelCamera</string>
+    <string name="button_photo">撮影</string>
+</resources>
