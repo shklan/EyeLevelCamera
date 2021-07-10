@@ -9,9 +9,12 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.hardware.camera2.*
 import android.media.ImageReader
+import android.net.wifi.aware.Characteristics
 import android.os.*
+import android.text.style.LineHeightSpan
 import android.util.DisplayMetrics
 import android.util.Log
+import android.util.Size
 import android.view.Surface
 import android.view.TextureView
 import android.view.View
@@ -42,7 +45,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private val orientation = FloatArray(3)
 
     //camera
-    private var windowRoration: Int? = null
+    private var windowRotation: Int? = null
     private var cameraRotation: Int? = null
     private lateinit var metrics: DisplayMetrics
 
@@ -77,7 +80,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             activityStopped = savedInstanceState.getBoolean(ACTIVITY_STATUS)
         }
         val windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        windowRoration = windowManager.defaultDisplay.rotation
+        windowRotation = windowManager.defaultDisplay.rotation
         requestPermission()
 
         //sensor
@@ -98,7 +101,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
             override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
                 Log.d(TAG, "onSurfaceTextureSizeChanged")
-                eyeLevelView.followSize(preview)
             }
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
             override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
@@ -188,8 +190,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         val rawRotationMatrix = FloatArray(9)
         SensorManager.getRotationMatrix(rawRotationMatrix, null, accelerometerValue, magnetometerValue)
-//      X-Z平面が基準面となるように変換
-        SensorManager.remapCoordinateSystem(rawRotationMatrix, SensorManager.AXIS_X, SensorManager.AXIS_Z, rotationMatrix)
+//      X-Z平面が基準面の変換
+        if (90 * windowRotation!! % 180 == 0) {
+            SensorManager.remapCoordinateSystem(rawRotationMatrix, SensorManager.AXIS_X, SensorManager.AXIS_Z, rotationMatrix)
+        } else {
+            SensorManager.remapCoordinateSystem(rawRotationMatrix, SensorManager.AXIS_MINUS_Z, SensorManager.AXIS_X, rotationMatrix)
+        }
         SensorManager.getOrientation(rotationMatrix, orientation)
         val timestamp = event.timestamp
 //            Log.d(TAG, "X: " +eventValueX+ ", Y: " +eventValueY+ ", Z:" +eventValueZ)
@@ -232,7 +238,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun createCameraCaptureSession() {
         val texture = preview.surfaceTexture
         // うまいことやる必要あり
+        Log.d(TAG, "preview width " +preview.width+ ", height " +preview.height)
         texture?.setDefaultBufferSize(preview.width, preview.height)
+        eyeLevelView.followSize(preview)
         val previewSurface = Surface(texture)
         val captureSurface = mImageReader?.surface
 
@@ -308,13 +316,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     val rawPicture = BitmapFactory.decodeByteArray(rawData, 0, rawData.size, option)
 
                     val matrix = Matrix()
-                    matrix.postRotate(90f)
+                    val rotation = (cameraRotation!! - windowRotation!! * 90).toFloat()
+                    Log.d(TAG, "rawPicture rotation " +rotation)
+                    matrix.postRotate(rotation)
                     val transformedPicture = Bitmap.createBitmap(rawPicture, 0, 0, rawPicture.width, rawPicture.height, matrix, false)
 
                     // eyeLevelの描画
                     val outputCanvas = Canvas(transformedPicture)
                     val paint = Paint()
-                    outputCanvas.drawBitmap(transformedPicture, 0f, 0f, paint)
                     eyeLevelView.drawTo(outputCanvas)
 
                     // 保存
@@ -334,16 +343,49 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }, backHandler)
 
         // preview
+        var optimalSize: Size
         val matrix = Matrix()
-        matrix.postRotate(90*windowRoration!!.toFloat(), preview.width * 0.5f, preview.height * 0.5f)
-//            preview.setTransform(matrix)
-        if ((cameraRotation!! + 90*windowRoration!!) % 180 == 0) {
+        Log.d(TAG, "window rotation " +90*windowRotation!!)
+
+        if ((cameraRotation!! - 90*windowRotation!!) % 180 == 0) {
+            Log.d(TAG, "rotated")
+            optimalSize = findOptimalSize(characteristics, activeWidth, activeHeight)
             preview.setAspectRatio(activeWidth, activeHeight)
+            val viewRect = RectF(0f, 0f, preview.width.toFloat(), preview.height.toFloat())
+            val bufferRect = RectF(0f, 0f, activeHeight.toFloat(), activeWidth.toFloat())
+            bufferRect.offset(viewRect.centerX()-bufferRect.centerX(), viewRect.centerY()-bufferRect.centerY())
+            matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL)
+            val scaleX = preview.width.toFloat()/activeWidth
+            val scaleY = preview.height.toFloat()/activeHeight
+//            val scale = Math.min(preview.height.toFloat()/activeHeight, preview.width.toFloat()/activeWidth)
+            matrix.postScale(1f, 1f, viewRect.centerX(), viewRect.centerY())
+            matrix.postRotate(-90*windowRotation!!.toFloat(), viewRect.centerX(), viewRect.centerY())
+
             eyeLevelView.setAngle(focalLength!![0], physicalHeight!! * activeHeight / pixelHeight!!)
         } else {
+            Log.d(TAG, "normal")
+//            optimalSize = findOptimalSize(characteristics, activeHeight, activeWidth)
             preview.setAspectRatio(activeHeight, activeWidth)
+            matrix.postRotate(-90*windowRotation!!.toFloat(), activeHeight/2f, activeWidth/2f)
             eyeLevelView.setAngle(focalLength!![0], physicalWidth!! * activeWidth / pixelWidth!!)
         }
+//        Log.d(TAG, "selected size " +optimalSize.width + " : " +optimalSize.height)
+        preview.setTransform(matrix)
+    }
+
+    private fun findOptimalSize(characteristics: CameraCharacteristics, width: Int, height: Int): Size {
+        val aspect = width.toFloat() / height
+        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!
+        val candidate = hashMapOf<Float, Size>()
+        for (size in map.getOutputSizes(SurfaceTexture::class.java)) {
+            val candidateWidth = size.width
+            val candidateHeight = size.height
+            val candidateAspect = candidateWidth.toFloat() / candidateHeight
+            val diff = Math.abs(aspect - candidateAspect)
+            candidate.put(diff, size)
+        }
+        val keys = candidate.keys
+        return candidate.get(keys.minOrNull()!!)!!
     }
 
     private fun transformPreview() {
