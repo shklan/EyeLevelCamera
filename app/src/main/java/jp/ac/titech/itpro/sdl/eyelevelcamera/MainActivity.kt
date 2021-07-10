@@ -2,23 +2,16 @@ package jp.ac.titech.itpro.sdl.eyelevelcamera
 
 import android.content.Context
 import android.content.pm.PackageManager
-import android.graphics.Matrix
-import android.graphics.Rect
-import android.graphics.SurfaceTexture
+import android.graphics.*
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.hardware.SensorManager.AXIS_X
-import android.hardware.SensorManager.AXIS_Z
 import android.hardware.camera2.*
 import android.media.ImageReader
-import android.os.Bundle
-import android.os.Handler
-import android.os.HandlerThread
+import android.os.*
 import android.util.DisplayMetrics
 import android.util.Log
-import android.util.Size
 import android.view.Surface
 import android.view.TextureView
 import android.view.View
@@ -27,6 +20,9 @@ import android.widget.Button
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import java.io.File
+import java.io.FileOutputStream
+import java.lang.Exception
 import java.util.*
 
 class MainActivity : AppCompatActivity(), SensorEventListener {
@@ -50,6 +46,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var cameraRotation: Int? = null
     private lateinit var metrics: DisplayMetrics
 
+    private var mImageReader: ImageReader? = null
     private var mCaptureSession: CameraCaptureSession? = null
     private lateinit var mPreviewRequestBuilder: CaptureRequest.Builder
     private lateinit var mPreviewRequest: CaptureRequest
@@ -65,61 +62,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private val cameraFacing: Int = CameraCharacteristics.LENS_FACING_BACK
     private var activityStopped: Boolean = false
 
-    private val previewListener : TextureView.SurfaceTextureListener =
-        object : TextureView.SurfaceTextureListener {
-            override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                openCamera()
-            }
-
-            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-                Log.d(TAG, "onSurfaceTextureSizeChanged")
-                eyeLevelView.followSize(preview)
-            }
-
-            override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
-
-            override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
-//                TODO("Not yet implemented")
-            }
-
-        }
-    private val mCameraCallback : CameraDevice.StateCallback =
-        object : CameraDevice.StateCallback () {
-            override fun onOpened(camera: CameraDevice) {
-                mCamera = camera
-                createCameraCaptureSession()
-            }
-            override fun onDisconnected(camera: CameraDevice) {
-                closeCamera()
-            }
-            override fun onError(camera: CameraDevice, error: Int) {
-                closeCamera()
-            }
-        }
-    private val mStateCallback : CameraCaptureSession.StateCallback =
-        object : CameraCaptureSession.StateCallback () {
-            override fun onConfigured(session: CameraCaptureSession) {
-                mCaptureSession = session
-                mCaptureSession?.setRepeatingRequest(mPreviewRequestBuilder.build(), mCaptureCallback, backHandler)
-            }
-
-            override fun onConfigureFailed(session: CameraCaptureSession) {
-
-            }
-        }
     private val mCaptureCallback : CameraCaptureSession.CaptureCallback =
         object : CameraCaptureSession.CaptureCallback () {
-            override fun onCaptureCompleted(
-                session: CameraCaptureSession,
-                request: CaptureRequest,
-                result: TotalCaptureResult
-            ) {
+            override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
                 super.onCaptureCompleted(session, request, result)
             }
-
         }
-    private val mOnImageAvailableListener : ImageReader.OnImageAvailableListener? = null
-
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Log.d(TAG, "onCreate: ")
@@ -130,6 +78,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         val windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         windowRoration = windowManager.defaultDisplay.rotation
+        requestPermission()
 
         //sensor
         eyeLevelView = findViewById(R.id.eyeLevelView)
@@ -143,16 +92,38 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         //camera
         preview = findViewById(R.id.preview)
-        preview.surfaceTextureListener = previewListener
+        preview.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                openCamera()
+            }
+            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                Log.d(TAG, "onSurfaceTextureSizeChanged")
+                eyeLevelView.followSize(preview)
+            }
+            override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
+            override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
+//                TODO("Not yet implemented")
+            }
+        }
         metrics = this.resources.displayMetrics
-        requestPermission()
-
 
         // 撮影ボタン
         val button = findViewById<Button>(R.id.photo_button)
         button.setOnClickListener(fun(view: View) {
-            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START)
-            mCaptureSession?.capture(mPreviewRequestBuilder.build(), mCaptureCallback, backHandler)
+            if (mCaptureSession == null) return
+            val captureBuilder = mCamera?.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)!!
+            val captureSurface = mImageReader!!.surface
+            captureBuilder.addTarget(captureSurface)
+            captureBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START)
+            mCaptureSession?.stopRepeating()
+            mCaptureSession?.abortCaptures()
+            mCaptureSession?.capture(captureBuilder.build(),
+                object : CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                        super.onCaptureCompleted(session, request, result)
+                        mCaptureSession?.setRepeatingRequest(mPreviewRequestBuilder.build(), mCaptureCallback, backHandler)
+                    }
+                }, backHandler)
         })
     }
 
@@ -243,19 +214,42 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         mCameraId = selectCameraId()
         val characteristics = cameraManager.getCameraCharacteristics(mCameraId)
         configureView(characteristics)
-        cameraManager.openCamera(mCameraId, mCameraCallback, backHandler)
+        cameraManager.openCamera(mCameraId,
+            object : CameraDevice.StateCallback () {
+                override fun onOpened(camera: CameraDevice) {
+                    mCamera = camera
+                    createCameraCaptureSession()
+                }
+                override fun onDisconnected(camera: CameraDevice) {
+                    closeCamera()
+                }
+                override fun onError(camera: CameraDevice, error: Int) {
+                    closeCamera()
+                }
+            }, backHandler)
     }
 
     private fun createCameraCaptureSession() {
         val texture = preview.surfaceTexture
         // うまいことやる必要あり
         texture?.setDefaultBufferSize(preview.width, preview.height)
-        val surface = Surface(texture)
+        val previewSurface = Surface(texture)
+        val captureSurface = mImageReader?.surface
 
         mPreviewRequestBuilder = mCamera!!.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-        mPreviewRequestBuilder.addTarget(surface)
+        mPreviewRequestBuilder.addTarget(previewSurface)
 
-        mCamera!!.createCaptureSession(Arrays.asList(surface), mStateCallback, null)
+        mCamera!!.createCaptureSession(Arrays.asList(previewSurface, captureSurface),
+            object : CameraCaptureSession.StateCallback () {
+                override fun onConfigured(session: CameraCaptureSession) {
+                    mCaptureSession = session
+                    mCaptureSession?.setRepeatingRequest(mPreviewRequestBuilder.build(), mCaptureCallback, backHandler)
+                }
+
+                override fun onConfigureFailed(session: CameraCaptureSession) {
+
+                }
+            }, null)
     }
 
     private fun closeCamera() {
@@ -266,6 +260,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         if (mCaptureSession != null) {
             mCaptureSession?.close()
             mCaptureSession = null
+        }
+        if (mImageReader != null) {
+            mImageReader?.close()
+            mImageReader = null
         }
     }
 
@@ -296,40 +294,55 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val physicalWidth = physicalSize?.width
         val physicalHeight = physicalSize?.height
 
+        //imageReader
+        mImageReader = ImageReader.newInstance(activeWidth!!, activeHeight!!, ImageFormat.JPEG, 4)
+        mImageReader?.setOnImageAvailableListener(
+            object : ImageReader.OnImageAvailableListener {
+                override fun onImageAvailable(reader: ImageReader?) {
+                    val image = reader?.acquireNextImage()
+                    val buffer = image!!.planes[0].buffer
+                    val rawData = ByteArray(buffer.capacity())
+                    buffer.get(rawData)
+                    val option = BitmapFactory.Options()
+                    option.inMutable = true
+                    val rawPicture = BitmapFactory.decodeByteArray(rawData, 0, rawData.size, option)
+
+                    val matrix = Matrix()
+                    matrix.postRotate(90f)
+                    val transformedPicture = Bitmap.createBitmap(rawPicture, 0, 0, rawPicture.width, rawPicture.height, matrix, false)
+
+                    // eyeLevelの描画
+                    val outputCanvas = Canvas(transformedPicture)
+                    val paint = Paint()
+                    outputCanvas.drawBitmap(transformedPicture, 0f, 0f, paint)
+                    eyeLevelView.drawTo(outputCanvas)
+
+                    // 保存
+                    try {
+                        val state = Environment.getExternalStorageState()
+                        if (Environment.MEDIA_MOUNTED.equals(state)) {
+                            Log.d(TAG, "export picture")
+                            val exportDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES.toString())
+                            val output = FileOutputStream(File(exportDir, "ELC.png"))
+                            Log.d(TAG, "to "+exportDir)
+                            transformedPicture.compress(Bitmap.CompressFormat.JPEG, 95, output)
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }, backHandler)
+
         // preview
         val matrix = Matrix()
         matrix.postRotate(90*windowRoration!!.toFloat(), preview.width * 0.5f, preview.height * 0.5f)
 //            preview.setTransform(matrix)
         if ((cameraRotation!! + 90*windowRoration!!) % 180 == 0) {
             preview.setAspectRatio(activeWidth, activeHeight)
-            eyeLevelView.setAngle(focalLength!![0], physicalHeight!! * activeHeight!! / pixelHeight!!)
+            eyeLevelView.setAngle(focalLength!![0], physicalHeight!! * activeHeight / pixelHeight!!)
         } else {
             preview.setAspectRatio(activeHeight, activeWidth)
-            eyeLevelView.setAngle(focalLength!![0], physicalWidth!! * activeWidth!! / pixelWidth!!)
-        }
-    }
-
-    private fun selectOptimalSize(sizes: Array<Size>): Size {
-        val targetWidth = metrics.widthPixels.toDouble()
-        val targetHeight = metrics.heightPixels.toDouble()
-        val targetRatio = targetHeight / targetWidth
-        Log.d(TAG, "height: " +targetHeight+ ", width: " +targetWidth+ ", ratio: " +targetRatio)
-
-        val candidates = hashMapOf<Double, Size>()
-        for (size in sizes) {
-            val ratio = size.height.toDouble() / size.width.toDouble()
-            val diff = Math.abs(targetRatio - ratio)
-            candidates.put(diff, size)
-        }
-        if (candidates.isEmpty()) {
-            Log.d(TAG, "no candidates found")
-            return sizes[0]
-        } else {
-            Log.d(TAG, "select candidates")
-            val diffs = candidates.keys
-            val optimalSize = candidates.get(diffs.minOrNull())!!
-            Log.d(TAG, "height: " +optimalSize.height+ ", width: " +optimalSize.width)
-            return optimalSize
+            eyeLevelView.setAngle(focalLength!![0], physicalWidth!! * activeWidth / pixelWidth!!)
         }
     }
 
@@ -355,11 +368,4 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             e.printStackTrace()
         }
     }
-
-//    fun shot(view: View) {
-//
-//    }
-//
-//
-
 }
