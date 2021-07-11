@@ -31,8 +31,11 @@ import java.util.*
 class MainActivity : AppCompatActivity(), SensorEventListener {
     private val TAG = this::class.simpleName
     private val ACTIVITY_STATUS: String = "activity_status"
-    private val REQUEST_CAMERA = 200
-    private val REQUEST_STORAGE = 201
+    private val REQUEST_CODE = 200
+
+    //permission
+    private var ALLOW_CAMERA = false
+    private var ALLOW_STORAGE = false
 
     //sensor
     private lateinit var eyeLevelView: EyeLevelView
@@ -97,7 +100,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         preview = findViewById(R.id.preview)
         preview.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                openCamera()
+                if(ALLOW_CAMERA) {
+                    Log.d(TAG, "onSurfaceTextureAvailable")
+                    openCamera()
+                }
             }
             override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
                 Log.d(TAG, "onSurfaceTextureSizeChanged")
@@ -106,7 +112,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
             override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
-//                TODO("Not yet implemented")
             }
         }
         metrics = this.resources.displayMetrics
@@ -134,8 +139,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     override fun onResume() {
         Log.d(TAG, "onResume: ")
         super.onResume()
-        Log.d(TAG, "activitiyStopped: "+activityStopped)
-        if (preview.isAvailable && activityStopped) {
+        Log.d(TAG, "ALLOW: "+ALLOW_CAMERA)
+        if (ALLOW_CAMERA && preview.isAvailable && activityStopped) {
             openCamera()
             activityStopped = false
         }
@@ -157,25 +162,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         closeCamera()
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_CAMERA) {
-            if (grantResults.size > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                openCamera()
-            } else {
-                finish()
-            }
-        }
-        if (requestCode == REQUEST_STORAGE) {
-            if (grantResults.size > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-
-            } else {
-                finish()
-            }
+        Log.d(TAG, "onRequestPermissionResult")
+        if (requestCode == REQUEST_CODE) {
+            ALLOW_CAMERA =
+                ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+            ALLOW_STORAGE =
+                ContextCompat.checkSelfPermission(this, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         }
     }
 
@@ -208,30 +202,36 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun requestPermission() {
-        val camera_permission = ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA)
-        val save_permission = ContextCompat.checkSelfPermission(this, android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-        if (camera_permission == PackageManager.PERMISSION_DENIED) {
-            ActivityCompat.requestPermissions(this, Array<String>(1, {android.Manifest.permission.CAMERA}), REQUEST_CAMERA)
-        }
-        if (save_permission == PackageManager.PERMISSION_DENIED) {
-            ActivityCompat.requestPermissions(this, Array<String>(1, {android.Manifest.permission.WRITE_EXTERNAL_STORAGE}), REQUEST_STORAGE)
+        ALLOW_CAMERA =
+            ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        ALLOW_STORAGE =
+            ContextCompat.checkSelfPermission(this, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        if (!ALLOW_CAMERA || !ALLOW_STORAGE) {
+            ActivityCompat.requestPermissions(this, arrayOf(
+                android.Manifest.permission.CAMERA,
+                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ), REQUEST_CODE)
         }
     }
 
     private fun openCamera() {
+        Log.d(TAG, "openCamera")
         mCameraId = selectCameraId()
         val characteristics = cameraManager.getCameraCharacteristics(mCameraId)
         configureView(characteristics)
         cameraManager.openCamera(mCameraId,
             object : CameraDevice.StateCallback () {
                 override fun onOpened(camera: CameraDevice) {
+                    Log.d(TAG, "camera opened")
                     mCamera = camera
                     createCameraCaptureSession()
                 }
                 override fun onDisconnected(camera: CameraDevice) {
+                    Log.d(TAG, "camera disconnected")
                     closeCamera()
                 }
                 override fun onError(camera: CameraDevice, error: Int) {
+                    Log.d(TAG, "camera error")
                     closeCamera()
                 }
             }, backHandler)
@@ -239,26 +239,30 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun createCameraCaptureSession() {
         val texture = preview.surfaceTexture
+        assert(texture != null)
         // うまいことやる必要あり
         Log.d(TAG, "preview width " +preview.width+ ", height " +preview.height)
         texture?.setDefaultBufferSize(preview.width, preview.height)
         val previewSurface = Surface(texture)
         val captureSurface = mImageReader?.surface
+        try {
+            mPreviewRequestBuilder = mCamera?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)!!
+            mPreviewRequestBuilder.addTarget(previewSurface)
+            mCamera!!.createCaptureSession(Arrays.asList(previewSurface, captureSurface),
+                object : CameraCaptureSession.StateCallback () {
+                    override fun onConfigured(session: CameraCaptureSession) {
+                        mCaptureSession = session
+                        mCaptureSession?.setRepeatingRequest(mPreviewRequestBuilder.build(), mCaptureCallback, backHandler)
+                    }
 
-        mPreviewRequestBuilder = mCamera!!.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-        mPreviewRequestBuilder.addTarget(previewSurface)
+                    override fun onConfigureFailed(session: CameraCaptureSession) {
 
-        mCamera!!.createCaptureSession(Arrays.asList(previewSurface, captureSurface),
-            object : CameraCaptureSession.StateCallback () {
-                override fun onConfigured(session: CameraCaptureSession) {
-                    mCaptureSession = session
-                    mCaptureSession?.setRepeatingRequest(mPreviewRequestBuilder.build(), mCaptureCallback, backHandler)
-                }
-
-                override fun onConfigureFailed(session: CameraCaptureSession) {
-
-                }
-            }, null)
+                    }
+                }, null)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return
+        }
     }
 
     private fun closeCamera() {
@@ -290,6 +294,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun configureView(characteristics: CameraCharacteristics) {
+        Log.d(TAG, "configureView")
         cameraRotation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION)
         Log.d(TAG, "orientation " +cameraRotation)
         val focalLength = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
@@ -330,7 +335,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     // 保存
                     try {
                         val state = Environment.getExternalStorageState()
-                        if (Environment.MEDIA_MOUNTED.equals(state)) {
+                        if (ALLOW_STORAGE && Environment.MEDIA_MOUNTED.equals(state)) {
                             Log.d(TAG, "export picture")
                             val exportDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES.toString())
                             val output = FileOutputStream(File(exportDir, "ELC.png"))
