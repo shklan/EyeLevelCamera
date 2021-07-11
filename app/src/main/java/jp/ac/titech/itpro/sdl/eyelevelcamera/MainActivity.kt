@@ -346,26 +346,34 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         var optimalSize: Size
         val matrix = Matrix()
         Log.d(TAG, "window rotation " +90*windowRotation!!)
+        optimalSize = findOptimalSize(characteristics, activeWidth, activeHeight)
 
         if ((cameraRotation!! - 90*windowRotation!!) % 180 == 0) {
             Log.d(TAG, "rotated")
-            optimalSize = findOptimalSize(characteristics, activeWidth, activeHeight)
-            preview.setAspectRatio(activeWidth, activeHeight)
+            Log.d(TAG, "preview " +preview.width+ " : "+ preview.height)
+            Log.d(TAG, "newRect activeWidth = " +activeWidth+ ", : activeHeight = " +activeHeight)
+            preview.setAspectRatio(optimalSize.width, optimalSize.height)
+            //
+            Log.d(TAG, "preview " +preview.width+ " : "+ preview.height)
             val viewRect = RectF(0f, 0f, preview.width.toFloat(), preview.height.toFloat())
-            val bufferRect = RectF(0f, 0f, activeHeight.toFloat(), activeWidth.toFloat())
-            bufferRect.offset(viewRect.centerX()-bufferRect.centerX(), viewRect.centerY()-bufferRect.centerY())
-            matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL)
-            val scaleX = preview.width.toFloat()/activeWidth
-            val scaleY = preview.height.toFloat()/activeHeight
-//            val scale = Math.min(preview.height.toFloat()/activeHeight, preview.width.toFloat()/activeWidth)
-            matrix.postScale(1f, 1f, viewRect.centerX(), viewRect.centerY())
-            matrix.postRotate(-90*windowRotation!!.toFloat(), viewRect.centerX(), viewRect.centerY())
+            val newRect = RectF(0f, 0f, activeHeight.toFloat(), activeWidth.toFloat())
+            newRect.offset(viewRect.centerX() - newRect.centerX(), viewRect.centerY() - newRect.centerY())
 
+//            今の view を（回転前の）view に変形
+            matrix.setRectToRect(viewRect, newRect, Matrix.ScaleToFit.FILL)
+//            X: スマホの縦方向，Y: スマホの横方向
+            val scaleX = viewRect.width()/newRect.height()
+            val scaleY = viewRect.height()/newRect.width()
+            val scale = Math.min(scaleX, scaleY)
+            Log.d(TAG, "scaleX = " +scaleX+ ", scaleY = " +scaleY)
+            matrix.postScale(scale, scale, viewRect.centerX(), viewRect.centerY())
+//            view の回転（縦横比がここで正しくなる）
+            matrix.postRotate(-90*windowRotation!!.toFloat(), viewRect.centerX(), viewRect.centerY())
+//            Log.d(TAG, "matrix " +matrix.toShortString())
             eyeLevelView.setAngle(focalLength!![0], physicalHeight!! * activeHeight / pixelHeight!!)
         } else {
             Log.d(TAG, "normal")
-//            optimalSize = findOptimalSize(characteristics, activeHeight, activeWidth)
-            preview.setAspectRatio(activeHeight, activeWidth)
+            preview.setAspectRatio(optimalSize.height, optimalSize.width)
             matrix.postRotate(-90*windowRotation!!.toFloat(), activeHeight/2f, activeWidth/2f)
             eyeLevelView.setAngle(focalLength!![0], physicalWidth!! * activeWidth / pixelWidth!!)
         }
@@ -376,16 +384,33 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun findOptimalSize(characteristics: CameraCharacteristics, width: Int, height: Int): Size {
         val aspect = width.toFloat() / height
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!
-        val candidate = hashMapOf<Float, Size>()
-        for (size in map.getOutputSizes(SurfaceTexture::class.java)) {
-            val candidateWidth = size.width
-            val candidateHeight = size.height
-            val candidateAspect = candidateWidth.toFloat() / candidateHeight
-            val diff = Math.abs(aspect - candidateAspect)
-            candidate.put(diff, size)
+        val candidate = hashMapOf<Int, Size>()
+        val subCanditdate = hashMapOf<Int, Size>()
+        val availableSizes = map.getOutputSizes(SurfaceTexture::class.java)
+
+        for (size in availableSizes) {
+            val candidateAspect = size.width.toFloat() / size.height
+            if (Math.abs(aspect - candidateAspect) < 0.1) {
+                if (size.width < preview.width && size.height < preview.height) {
+                    candidate.put(size.width, size)
+                } else {
+                    subCanditdate.put(size.width, size)
+                }
+            }
         }
-        val keys = candidate.keys
-        return candidate.get(keys.minOrNull()!!)!!
+
+        if (!candidate.isEmpty()){
+            Log.d(TAG, "select from candidate")
+            val keys = candidate.keys
+            return candidate.get(keys.maxOrNull()!!)!!
+        } else if (!subCanditdate.isEmpty()) {
+            Log.d(TAG, "select from subCandidate")
+            val keys = subCanditdate.keys
+            return subCanditdate.get(keys.minOrNull()!!)!!
+        } else {
+            Log.d(TAG, "select from default (0)")
+            return availableSizes[0]
+        }
     }
 
     private fun transformPreview() {

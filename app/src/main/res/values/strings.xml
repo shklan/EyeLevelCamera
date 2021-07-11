@@ -1,4 +1,6 @@
+<?xml version="1.0" encoding="utf-8" ?>
 <resources>
     <string name="app_name">EyeLevelCamera</string>
     <string name="button_photo">撮影</string>
+    <string name="button_photo_land">撮&#10;影</string>
 </resources>

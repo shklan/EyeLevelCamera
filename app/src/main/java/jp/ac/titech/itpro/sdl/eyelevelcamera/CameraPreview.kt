@@ -41,13 +41,12 @@ class CameraPreview : TextureView {
             Log.d(this::class.simpleName, "current " +width+ " : " +height)
             val fixedHeight = width * heightRatio!! / widthRatio!!
             val fixedWidth = height * widthRatio!! / heightRatio!!
-
             if (width < fixedWidth) {
-                Log.d(this::class.simpleName, "fixed to " +width+ " : " +fixedHeight)
+                Log.d(this::class.simpleName, "fixed to " +widthRatio+ " : " +heightRatio)
                 setMeasuredDimension(width, fixedHeight)
             }
             else {
-                Log.d(this::class.simpleName, "fixed to " +fixedWidth+ " : " +height)
+                Log.d(this::class.simpleName, "fixed to " + fixedWidth + " : " + height)
                 setMeasuredDimension(fixedWidth, height)
             }
         }
