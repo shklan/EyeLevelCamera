@@ -101,6 +101,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
             override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
                 Log.d(TAG, "onSurfaceTextureSizeChanged")
+                eyeLevelView.followSize(preview)
+                transformPreview()
             }
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
             override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
@@ -240,7 +242,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         // うまいことやる必要あり
         Log.d(TAG, "preview width " +preview.width+ ", height " +preview.height)
         texture?.setDefaultBufferSize(preview.width, preview.height)
-        eyeLevelView.followSize(preview)
         val previewSurface = Surface(texture)
         val captureSurface = mImageReader?.surface
 
@@ -344,41 +345,20 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         // preview
         var optimalSize: Size
-        val matrix = Matrix()
         Log.d(TAG, "window rotation " +90*windowRotation!!)
         optimalSize = findOptimalSize(characteristics, activeWidth, activeHeight)
 
         if ((cameraRotation!! - 90*windowRotation!!) % 180 == 0) {
             Log.d(TAG, "rotated")
-            Log.d(TAG, "preview " +preview.width+ " : "+ preview.height)
-            Log.d(TAG, "newRect activeWidth = " +activeWidth+ ", : activeHeight = " +activeHeight)
+//            出力画面のリサイズ
             preview.setAspectRatio(optimalSize.width, optimalSize.height)
-            //
-            Log.d(TAG, "preview " +preview.width+ " : "+ preview.height)
-            val viewRect = RectF(0f, 0f, preview.width.toFloat(), preview.height.toFloat())
-            val newRect = RectF(0f, 0f, activeHeight.toFloat(), activeWidth.toFloat())
-            newRect.offset(viewRect.centerX() - newRect.centerX(), viewRect.centerY() - newRect.centerY())
-
-//            今の view を（回転前の）view に変形
-            matrix.setRectToRect(viewRect, newRect, Matrix.ScaleToFit.FILL)
-//            X: スマホの縦方向，Y: スマホの横方向
-            val scaleX = viewRect.width()/newRect.height()
-            val scaleY = viewRect.height()/newRect.width()
-            val scale = Math.min(scaleX, scaleY)
-            Log.d(TAG, "scaleX = " +scaleX+ ", scaleY = " +scaleY)
-            matrix.postScale(scale, scale, viewRect.centerX(), viewRect.centerY())
-//            view の回転（縦横比がここで正しくなる）
-            matrix.postRotate(-90*windowRotation!!.toFloat(), viewRect.centerX(), viewRect.centerY())
-//            Log.d(TAG, "matrix " +matrix.toShortString())
             eyeLevelView.setAngle(focalLength!![0], physicalHeight!! * activeHeight / pixelHeight!!)
         } else {
             Log.d(TAG, "normal")
+//            出力画面のリサイズ
             preview.setAspectRatio(optimalSize.height, optimalSize.width)
-            matrix.postRotate(-90*windowRotation!!.toFloat(), activeHeight/2f, activeWidth/2f)
             eyeLevelView.setAngle(focalLength!![0], physicalWidth!! * activeWidth / pixelWidth!!)
         }
-//        Log.d(TAG, "selected size " +optimalSize.width + " : " +optimalSize.height)
-        preview.setTransform(matrix)
     }
 
     private fun findOptimalSize(characteristics: CameraCharacteristics, width: Int, height: Int): Size {
@@ -414,7 +394,39 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun transformPreview() {
-        TODO("transformPreview")
+        Log.d(TAG, "transformPreview")
+        val characteristics = cameraManager.getCameraCharacteristics(mCameraId)
+        val activeArraySize = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)!!
+        val activeWidth = activeArraySize.width()
+        val activeHeight = activeArraySize.height()
+
+        val matrix = Matrix()
+        Log.d(TAG, "" + (cameraRotation!! - 90*windowRotation!!))
+        if ((cameraRotation!! - 90*windowRotation!!) % 180 == 0) {
+            Log.d(TAG, "rotated")
+            Log.d(TAG, "preview " +preview.width+ " : "+ preview.height)
+            Log.d(TAG, "newRect activeWidth = " +activeWidth+ ", : activeHeight = " +activeHeight)
+
+            val oldRect = RectF(0f, 0f, preview.width.toFloat(), preview.height.toFloat())
+            val newRect = RectF(0f, 0f, activeHeight.toFloat(), activeWidth.toFloat())
+            newRect.offset(oldRect.centerX() - newRect.centerX(), oldRect.centerY() - newRect.centerY())
+
+//            今の view を（回転前の）view に変形
+            matrix.setRectToRect(oldRect, newRect, Matrix.ScaleToFit.FILL)
+//            X: スマホの縦方向，Y: スマホの横方向
+            val scaleX = oldRect.height() / newRect.width()
+            val scaleY = oldRect.width() / newRect.height()
+            val scale = Math.min(scaleX, scaleY)
+            Log.d(TAG, "scaleX = " +scaleX+ ", scaleY = " +scaleY)
+            matrix.postScale(scale, scale, oldRect.centerX(), oldRect.centerY())
+//            view の回転（縦横比がここで正しくなる）
+            matrix.postRotate(-90*windowRotation!!.toFloat(), oldRect.centerX(), oldRect.centerY())
+//            Log.d(TAG, "matrix " +matrix.toShortString())
+        } else {
+            Log.d(TAG, "normal")
+            matrix.postRotate(-90*windowRotation!!.toFloat(), activeHeight/2f, activeWidth/2f)
+        }
+        preview.setTransform(matrix)
     }
 
     private fun startBackThread() {
