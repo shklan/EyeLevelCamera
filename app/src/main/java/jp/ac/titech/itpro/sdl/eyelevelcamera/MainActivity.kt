@@ -58,8 +58,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var mPreviewRequest: CaptureRequest
     private lateinit var preview: CameraPreview
     private lateinit var mCameraId: String
-    private var backThread : HandlerThread? = null
-    private var backHandler : Handler? = null
 
     private var mCamera: CameraDevice? = null
     private val cameraManager by lazy {
@@ -130,9 +128,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 object : CameraCaptureSession.CaptureCallback() {
                     override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
                         super.onCaptureCompleted(session, request, result)
-                        mCaptureSession?.setRepeatingRequest(mPreviewRequestBuilder.build(), mCaptureCallback, backHandler)
+                        mCaptureSession?.setRepeatingRequest(mPreviewRequestBuilder.build(), mCaptureCallback, null)
                     }
-                }, backHandler)
+                }, null)
         })
     }
 
@@ -234,7 +232,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     Log.d(TAG, "camera error")
                     closeCamera()
                 }
-            }, backHandler)
+            }, null)
     }
 
     private fun createCameraCaptureSession() {
@@ -252,7 +250,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 object : CameraCaptureSession.StateCallback () {
                     override fun onConfigured(session: CameraCaptureSession) {
                         mCaptureSession = session
-                        mCaptureSession?.setRepeatingRequest(mPreviewRequestBuilder.build(), mCaptureCallback, backHandler)
+                        mCaptureSession?.setRepeatingRequest(mPreviewRequestBuilder.build(), mCaptureCallback, null)
                     }
 
                     override fun onConfigureFailed(session: CameraCaptureSession) {
@@ -346,7 +344,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                         e.printStackTrace()
                     }
                 }
-            }, backHandler)
+            }, null)
 
         // preview
         var optimalSize: Size
@@ -432,24 +430,5 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             matrix.postRotate(-90*windowRotation!!.toFloat(), activeHeight/2f, activeWidth/2f)
         }
         preview.setTransform(matrix)
-    }
-
-    private fun startBackThread() {
-        backThread = HandlerThread("backThread")
-        backThread!!.start()
-        backHandler = Handler(backThread!!.looper)
-    }
-
-    private fun stopBackThread() {
-        try {
-            if (backThread != null) {
-                backThread!!.quitSafely()
-                backThread!!.join()
-                backThread = null
-                backHandler = null
-            }
-        } catch (e: InterruptedException) {
-            e.printStackTrace()
-        }
     }
 }
