@@ -64,17 +64,17 @@ class EyeLevelView : View {
         super.onDraw(canvas)
         val centerHeight = previewHeight.toFloat() / 2
         val leftX = 0f
-        val lineHeight = centerHeight - centerHeight * Math.sin(eyeLevel.toDouble()).toFloat()/angle
+        val lineHeight = centerHeight - centerHeight * Math.sin(eyeLevel.toDouble())/Math.sin(angle.toDouble())
         val rightX = width.toFloat()
-        canvas?.drawLine(leftX, lineHeight, rightX, lineHeight, eyeLevelPaint)
+        canvas?.drawLine(leftX, lineHeight.toFloat(), rightX, lineHeight.toFloat(), eyeLevelPaint)
     }
 
     fun drawTo(canvas: Canvas?) {
         val centerHeight = canvas!!.height.toFloat() / 2
         val leftX = 0f
-        val lineHeight = centerHeight - centerHeight * Math.sin(eyeLevel.toDouble()).toFloat()/angle
+        val lineHeight = centerHeight - centerHeight * Math.sin(eyeLevel.toDouble())/Math.sin(angle.toDouble())
         val rightX = canvas.width.toFloat()
-        canvas?.drawLine(leftX, lineHeight, rightX, lineHeight, eyeLevelPaint)
+        canvas?.drawLine(leftX, lineHeight.toFloat(), rightX, lineHeight.toFloat(), eyeLevelPaint)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
